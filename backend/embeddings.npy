@@ -1,7 +1,6 @@
 import pandas as pd
 import numpy as np
 import requests
-import os
 
 API_KEY = "YOUR_API_KEY"
 
@@ -20,6 +19,9 @@ for t in texts:
     emb = res.json()["embedding"]["value"]
     emb_list.append(emb)
 
-np.save("embeddings.npy", np.array(emb_list))
+# Force numeric array
+emb = np.array(emb_list, dtype=float)
 
-print("Done: embeddings.npy created!")
+np.save("embeddings.npy", emb)
+
+print("embeddings.npy regenerated successfully")

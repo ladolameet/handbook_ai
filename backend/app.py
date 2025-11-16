@@ -23,7 +23,8 @@ df = pd.read_csv("handbook_final.csv")   # page | chunk
 texts = [f"Page {row['page']}: {row['chunk']}" for _, row in df.iterrows()]
 
 # 🔧 Load small numpy file of precomputed embeddings (<15MB)
-embeddings = np.load("embeddings.npy")
+embeddings = np.load("embeddings.npy", allow_pickle=True)
+embeddings = np.array(embeddings, dtype=float)
 
 print("Ready with:", len(texts), "chunks")
 
