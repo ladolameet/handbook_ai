@@ -26,6 +26,8 @@ texts = [f"Page {row['page']}: {row['chunk']}" for _, row in df.iterrows()]
 embeddings = np.load("embeddings.npy", allow_pickle=True)
 embeddings = np.array(embeddings, dtype=float)
 
+
+
 print("Ready with:", len(texts), "chunks")
 
 # ================================================
