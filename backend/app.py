@@ -13,32 +13,49 @@ from dotenv import load_dotenv
 load_dotenv("google_key.env")
 API_KEY = os.getenv("GOOGLE_API_KEY")
 
-# New Google embedding model
-EMBED_URL = "https://generativelanguage.googleapis.com/v1/models/text-embedding-004:embedContent"
-GEN_URL   = "https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent"
+if not API_KEY:
+    raise Exception("❌ GOOGLE_API_KEY not found in google_key.env")
+
+# Google API URLs
+EMBED_URL = f"https://generativelanguage.googleapis.com/v1/models/text-embedding-004:embedText?key={API_KEY}"
+GEN_URL   = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key={API_KEY}"
 
 # ================================================
-# Load handbook and generate embeddings in memory
+# Load handbook
 # ================================================
 df = pd.read_csv("handbook_final.csv")
 texts = [f"Page {row['page']}: {row['chunk']}" for _, row in df.iterrows()]
 
+# ================================================
+# Helper: Generate embedding for text
+# ================================================
 def embed_text(t):
     body = {
         "model": "text-embedding-004",
-        "input": t
+        "input": {"text": t}
     }
-    res = requests.post(f"{EMBED_URL}?key={API_KEY}", json=body)
+
+    res = requests.post(EMBED_URL, json=body)
     data = res.json()
-    return np.array(data["data"][0]["embedding"], dtype=float)
 
-# Generate embeddings once on server start
-embeddings = np.array([embed_text(t) for t in texts])
+    # Debug: print API errors
+    if "embedding" not in data:
+        print("❌ EMBED ERROR:", data)
+        raise Exception("Embedding API Error")
 
-print("Embeddings loaded in memory:", embeddings.shape)
+    return np.array(data["embedding"]["values"], dtype=float)
 
 # ================================================
-# FastAPI Setup
+# Build embeddings IN MEMORY (no npy file)
+# ================================================
+print("⏳ Generating embeddings (first-time only)...")
+
+embeddings = np.array([embed_text(t) for t in texts])
+
+print("✅ Embeddings ready:", embeddings.shape)
+
+# ================================================
+# FastAPI setup
 # ================================================
 app = FastAPI()
 
@@ -64,13 +81,13 @@ def search_similar(query, k=4):
     return [texts[i] for i in top]
 
 # ================================================
-# RAG answer
+# RAG Answer
 # ================================================
 def rag_answer(query):
     context = "\n".join(search_similar(query))
 
     prompt = f"""
-Use this handbook context to answer:
+Use the following handbook context to answer the question:
 
 Context:
 {context}
@@ -78,22 +95,22 @@ Context:
 Question:
 {query}
 
-Answer clearly.
+Answer clearly and correctly.
 """
 
-    body = {
-        "contents": [{"role": "user", "parts": [{"text": prompt}]}]
-    }
+    body = {"contents": [{"role": "user", "parts": [{"text": prompt}]}]}
 
-    res = requests.post(f"{GEN_URL}?key={API_KEY}", json=body)
+    res = requests.post(GEN_URL, json=body)
+    data = res.json()
 
     try:
-        return res.json()["candidates"][0]["content"]["parts"][0]["text"]
+        return data["candidates"][0]["content"]["parts"][0]["text"]
     except:
-        return "⚠ Gemini API error"
+        print("❌ GEMINI ERROR:", data)
+        return "⚠ Gemini API Error"
 
 # ================================================
-# Endpoint
+# API endpoint
 # ================================================
 @app.post("/chat")
 async def chat(data: Query):
