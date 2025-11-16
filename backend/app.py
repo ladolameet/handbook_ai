@@ -7,28 +7,28 @@ import requests
 import os
 from dotenv import load_dotenv
 
-# ================================================
+# ===================================================
 # Load API Key
-# ================================================
+# ===================================================
 load_dotenv("google_key.env")
 API_KEY = os.getenv("GOOGLE_API_KEY")
 
 if not API_KEY:
-    raise Exception("❌ GOOGLE_API_KEY not found in google_key.env")
+    raise Exception("❌ GOOGLE_API_KEY missing in Render environment!")
 
 # Google API URLs
 EMBED_URL = f"https://generativelanguage.googleapis.com/v1/models/text-embedding-004:embedText?key={API_KEY}"
 GEN_URL   = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key={API_KEY}"
 
-# ================================================
+# ===================================================
 # Load handbook
-# ================================================
+# ===================================================
 df = pd.read_csv("handbook_final.csv")
 texts = [f"Page {row['page']}: {row['chunk']}" for _, row in df.iterrows()]
 
-# ================================================
-# Helper: Generate embedding for text
-# ================================================
+# ===================================================
+# Helper: embed text
+# ===================================================
 def embed_text(t):
     body = {
         "model": "text-embedding-004",
@@ -38,25 +38,25 @@ def embed_text(t):
     res = requests.post(EMBED_URL, json=body)
     data = res.json()
 
-    # Debug: print API errors
+    # Debug for Render logs
     if "embedding" not in data:
-        print("❌ EMBED ERROR:", data)
+        print("❌ EMBEDDING ERROR:", data)
         raise Exception("Embedding API Error")
 
     return np.array(data["embedding"]["values"], dtype=float)
 
-# ================================================
-# Build embeddings IN MEMORY (no npy file)
-# ================================================
-print("⏳ Generating embeddings (first-time only)...")
+# ===================================================
+# Build embeddings (only once at startup)
+# ===================================================
+print("⏳ Generating embeddings, please wait...")
 
 embeddings = np.array([embed_text(t) for t in texts])
 
 print("✅ Embeddings ready:", embeddings.shape)
 
-# ================================================
-# FastAPI setup
-# ================================================
+# ===================================================
+# FastAPI Setup
+# ===================================================
 app = FastAPI()
 
 app.add_middleware(
@@ -69,25 +69,27 @@ app.add_middleware(
 class Query(BaseModel):
     query: str
 
-# ================================================
+# ===================================================
 # Find similar chunks
-# ================================================
+# ===================================================
 def search_similar(query, k=4):
     q_emb = embed_text(query)
+
     sims = embeddings @ q_emb / (
         np.linalg.norm(embeddings, axis=1) * np.linalg.norm(q_emb)
     )
-    top = sims.argsort()[-k:][::-1]
-    return [texts[i] for i in top]
 
-# ================================================
-# RAG Answer
-# ================================================
+    idxs = sims.argsort()[-k:][::-1]
+    return [texts[i] for i in idxs]
+
+# ===================================================
+# RAG Generator
+# ===================================================
 def rag_answer(query):
     context = "\n".join(search_similar(query))
 
     prompt = f"""
-Use the following handbook context to answer the question:
+Use this handbook context to answer the question:
 
 Context:
 {context}
@@ -95,10 +97,14 @@ Context:
 Question:
 {query}
 
-Answer clearly and correctly.
+Give a clear and correct answer.
 """
 
-    body = {"contents": [{"role": "user", "parts": [{"text": prompt}]}]}
+    body = {
+        "contents": [
+            {"role": "user", "parts": [{"text": prompt}]}
+        ]
+    }
 
     res = requests.post(GEN_URL, json=body)
     data = res.json()
@@ -106,12 +112,12 @@ Answer clearly and correctly.
     try:
         return data["candidates"][0]["content"]["parts"][0]["text"]
     except:
-        print("❌ GEMINI ERROR:", data)
-        return "⚠ Gemini API Error"
+        print("❌ GENERATION ERROR:", data)
+        return "⚠ Error generating response"
 
-# ================================================
-# API endpoint
-# ================================================
+# ===================================================
+# API Endpoint
+# ===================================================
 @app.post("/chat")
 async def chat(data: Query):
     return {"answer": rag_answer(data.query)}
